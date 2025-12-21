@@ -11,3 +11,4 @@ This repo will evolve into a rate-limited, correctness-tested message queue + be
 ### Run the server
 ```bash
 PYTHONPATH=src python3 src/ratelimmq/server.py
+```
