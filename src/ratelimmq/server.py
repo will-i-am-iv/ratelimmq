@@ -3,7 +3,7 @@ import os
 import signal
 
 from ratelimmq.context import Context
-from ratelimmq.protocol import parse_request
+from ratelimmq.protocol import parse_line
 from ratelimmq.router import dispatch
 
 async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, ctx: Context):
@@ -13,7 +13,7 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
             if not raw:
                 break  # client closed
 
-            req = parse_request(raw)
+            req = parse_line(line)
             resp = await dispatch(ctx, req)
 
             writer.write(resp.line.encode("utf-8"))
