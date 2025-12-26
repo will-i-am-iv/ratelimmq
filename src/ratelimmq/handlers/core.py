@@ -1,14 +1,16 @@
+cat > src/ratelimmq/handlers/core.py <<'PY'
+from __future__ import annotations
+
 from ratelimmq.context import Context
-from ratelimmq.protocol import Request, ok, err
+from ratelimmq.protocol import Request, Response, pong, bye, err_unknown
 
-async def ping(req: Request, ctx: Context) -> bytes:
-    return ok("PONG")
+async def ping(ctx: Context, req: Request) -> Response:
+    return pong()
 
-async def shutdown(req: Request, ctx: Context) -> bytes:
-    return ok("BYE")
+async def shutdown(ctx: Context, req: Request) -> Response:
+    ctx.stop_event.set()
+    return bye()
 
-async def help_cmd(req: Request, ctx: Context) -> bytes:
-    return ok("commands: PING, SHUTDOWN, HELP")
-
-async def unknown(req: Request, ctx: Context) -> bytes:
-    return err("unknown command")
+async def unknown(ctx: Context, req: Request) -> Response:
+    return err_unknown()
+PY
