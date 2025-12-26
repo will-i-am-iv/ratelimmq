@@ -1,3 +1,6 @@
+cat > src/ratelimmq/protocol.py <<'PY'
+from __future__ import annotations
+
 from dataclasses import dataclass
 
 @dataclass(frozen=True)
@@ -5,14 +8,23 @@ class Request:
     cmd: str
     args: list[str]
 
+@dataclass(frozen=True)
+class Response:
+    # A single line to write back to the client (must end with \n)
+    line: str
+
 def parse_line(line: str) -> Request:
     parts = line.strip().split()
-    cmd = parts[0].upper() if parts else ""
-    return Request(cmd=cmd, args=parts[1:])
+    if not parts:
+        return Request(cmd="", args=[])
+    return Request(cmd=parts[0].upper(), args=parts[1:])
 
-def ok(payload: str = "") -> bytes:
-    msg = "OK" if payload == "" else f"OK {payload}"
-    return (msg + "\n").encode()
+def pong() -> Response:
+    return Response("PONG\n")
 
-def err(message: str) -> bytes:
-    return (f"ERR {message}\n").encode()
+def bye() -> Response:
+    return Response("BYE\n")
+
+def err_unknown() -> Response:
+    return Response("ERR unknown command\n")
+PY
