@@ -1,22 +1,14 @@
-from __future__ import annotations
+def parse_line(raw) -> Request:
+    # raw can be bytes (from asyncio StreamReader) or str
+    if isinstance(raw, (bytes, bytearray)):
+        line = raw.decode("utf-8", errors="replace")
+    else:
+        line = str(raw)
 
-from dataclasses import dataclass
-
-
-@dataclass(frozen=True)
-class Request:
-    cmd: str
-    args: list[str]
-
-
-@dataclass(frozen=True)
-class Response:
-    line: str
-
-
-def parse_line(raw: bytes) -> Request:
-    line = raw.decode("utf-8", errors="replace").strip()
-    if not line:
+    parts = line.strip().split()
+    if not parts:
         return Request(cmd="", args=[])
-    parts = line.split()
-    return Request(cmd=parts[0].upper(), args=parts[1:])
+
+    cmd = parts[0].upper()
+    args = parts[1:]
+    return Request(cmd=cmd, args=args)
