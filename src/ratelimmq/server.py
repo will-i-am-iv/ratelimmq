@@ -61,4 +61,3 @@ if __name__ == "__main__":
     asyncio.run(main())
 """
 open("src/ratelimmq/server.py", "w", encoding="utf-8", newline="\\n").write(content)
-PY
