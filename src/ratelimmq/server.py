@@ -1,10 +1,10 @@
-import asyncio
 import os
 import signal
 
 from ratelimmq.context import Context
 from ratelimmq.protocol import parse_line
 from ratelimmq.router import dispatch
+
 
 async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, ctx: Context):
     try:
@@ -29,6 +29,7 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
         except Exception:
             pass
 
+
 async def main():
     host = os.environ.get("RATELIMMQ_HOST", "127.0.0.1")
     port = int(os.environ.get("RATELIMMQ_PORT", "5555"))
@@ -44,6 +45,7 @@ async def main():
             pass
 
     server = await asyncio.start_server(lambda r, w: handle_client(r, w, ctx), host, port)
+
     addrs = ", ".join(str(s.getsockname()) for s in (server.sockets or []))
     print(f"listening on {addrs}", flush=True)
 
@@ -57,3 +59,6 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+"""
+open("src/ratelimmq/server.py", "w", encoding="utf-8", newline="\\n").write(content)
+PY
