@@ -6,14 +6,15 @@ from ratelimmq.context import Context
 from ratelimmq.protocol import parse_line
 from ratelimmq.router import dispatch
 
+
 async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, ctx: Context):
     try:
         while True:
             raw = await reader.readline()
             if not raw:
-                break  # client closed
+                break
 
-            req = parse_line(line)
+            req = parse_line(raw)
             resp = await dispatch(ctx, req)
 
             writer.write(resp.line.encode("utf-8"))
@@ -27,6 +28,7 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
             await writer.wait_closed()
         except Exception:
             pass
+
 
 async def main():
     host = os.environ.get("RATELIMMQ_HOST", "127.0.0.1")
@@ -42,21 +44,17 @@ async def main():
         except NotImplementedError:
             pass
 
-    server = await asyncio.start_server(
-        lambda r, w: handle_client(r, w, ctx),
-        host,
-        port,
-    )
-
-    addrs = ", ".join(str(sock.getsockname()) for sock in server.sockets or [])
-    print(f"listening on {addrs}")
+    server = await asyncio.start_server(lambda r, w: handle_client(r, w, ctx), host, port)
+    addrs = ", ".join(str(s.getsockname()) for s in (server.sockets or []))
+    print(f"listening on {addrs}", flush=True)
 
     async with server:
         await stop_event.wait()
         server.close()
         await server.wait_closed()
 
-    print("shutdown complete")
+    print("shutdown complete", flush=True)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
