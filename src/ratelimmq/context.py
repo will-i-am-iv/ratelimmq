@@ -1,17 +1,16 @@
-cat > src/ratelimmq/context.py <<'PY'
 from __future__ import annotations
 
-from dataclasses import dataclass
 import asyncio
+from dataclasses import dataclass
 from typing import Any
+
 
 @dataclass
 class Context:
-    # Used to shut down the server gracefully (Week 1+2)
+    # Used by SHUTDOWN to stop the server cleanly.
     stop_event: asyncio.Event
 
     # Placeholders for later weeks (cache/queue/limiter)
     cache: Any | None = None
     queue: Any | None = None
     limiter: Any | None = None
-PY
