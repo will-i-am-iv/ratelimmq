@@ -1,19 +1,12 @@
-from __future__ import annotations
+from ratelimmq.handlers.core import ping, shutdown, help_cmd, unknown
 
-from typing import Awaitable, Callable
-
-from ratelimmq.context import Context
-from ratelimmq.handlers.core import handle_ping, handle_shutdown, handle_unknown
-from ratelimmq.protocol import Request, Response
-
-Handler = Callable[[Context, Request], Awaitable[Response]]
-
-ROUTES: dict[str, Handler] = {
-    "PING": handle_ping,
-    "SHUTDOWN": handle_shutdown,
+ROUTES = {
+    "PING": ping,
+    "SHUTDOWN": shutdown,
+    "HELP": help_cmd,
 }
 
-
-async def dispatch(ctx: Context, req: Request) -> Response:
-    handler = ROUTES.get(req.cmd, handle_unknown)
+async def dispatch(ctx, req):
+    cmd = (req.cmd or "").upper()
+    handler = ROUTES.get(cmd, unknown)
     return await handler(ctx, req)
