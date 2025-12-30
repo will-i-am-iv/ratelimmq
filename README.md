@@ -1,7 +1,13 @@
 [![CI](https://github.com/will-i-am-iv/ratelimmq/actions/workflows/ci.yml/badge.svg)](https://github.com/will-i-am-iv/ratelimmq/actions/workflows/ci.yml)
 
 # RateLimMQ
+---
 
+_Last updated: 2025-12-29_
+
+### Quick verify
+```bash
+PYTHONPATH=src python3 -m pytest -q
 A minimal **line-based TCP server** (Week 1) that responds to `PING` with `PONG`, supports a graceful `SHUTDOWN`, and is set up with **tests + GitHub Actions CI**.  
 This repo will evolve into a **rate-limited, correctness-tested message queue** + **benchmark harness**.
 
