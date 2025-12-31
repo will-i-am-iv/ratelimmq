@@ -5,7 +5,9 @@
 A minimal line-based TCP server (Week 1) that responds to `PING` with `PONG`, supports a graceful `SHUTDOWN`, and is set up with tests + GitHub Actions CI.  
 This repo will evolve into a rate-limited, correctness-tested message queue + benchmark harness.
 
-_Last updated: 2025-12-29_
+## Changelog
+
+- 2025-12-31: Minor docs update + verified tests passing locally.
 
 ---
 
@@ -13,7 +15,10 @@ _Last updated: 2025-12-29_
 
 ```bash
 PYTHONPATH=src python3 -m pytest -q
-```
+
+A minimal **line-based TCP server** that responds to `PING` with `PONG`, supports a graceful `SHUTDOWN`, and is set up with **tests + GitHub Actions CI**.  
+This repo will evolve into a **rate-limited, correctness-tested message queue** + **benchmark harness**.
+
 
 ---
 
@@ -91,6 +96,10 @@ In a `nc` client session:
 ---
 
 ## How it could be improved
+
+Next steps I plan to implement:
+- Rate limiting (token bucket / leaky bucket) per client + global
+- Message queue semantics: enqueue/dequeue, ack/nack, retries
 
 Next steps I plan to implement:
 
