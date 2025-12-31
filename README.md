@@ -13,9 +13,6 @@ This repo will evolve into a rate-limited, correctness-tested message queue + be
 
 ## Quick verify
 
-```bash
-PYTHONPATH=src python3 -m pytest -q
-
 A minimal **line-based TCP server** that responds to `PING` with `PONG`, supports a graceful `SHUTDOWN`, and is set up with **tests + GitHub Actions CI**.  
 This repo will evolve into a **rate-limited, correctness-tested message queue** + **benchmark harness**.
 
