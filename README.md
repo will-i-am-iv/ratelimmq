@@ -7,6 +7,8 @@ This repo will evolve into a rate-limited, correctness-tested message queue + be
 
 ## Changelog
 
+2026-01-03: Week 3 limiter rules verified; resolved stash conflict + reran full test suite.
+
 - 2025-12-31: Minor docs update + verified tests passing locally.
 
 ---
