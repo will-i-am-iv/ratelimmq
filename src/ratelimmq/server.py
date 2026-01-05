@@ -12,43 +12,47 @@ RATE_LIMIT_ERR = "ERR rate limited\n"
 LINE_TOO_LONG_ERR = "ERR line too long\n"
 
 
-async def _drain_to_newline(reader: asyncio.StreamReader) -> None:
-    """
-    Best-effort: discard bytes until we see a newline or EOF.
-    This prevents oversized lines from poisoning the next command.
-    """
-    while True:
-        chunk = await reader.read(1024)
-        if not chunk:
-            return
-        if b"\n" in chunk:
-            return
-
-
 async def handle_client(
     reader: asyncio.StreamReader,
     writer: asyncio.StreamWriter,
     ctx: Context,
     max_line_bytes: int,
 ) -> None:
+    async def drain_until_newline() -> None:
+        """
+        If a client sends an oversized line, asyncio can raise exceptions,
+        but the oversized bytes may still be buffered. Drain until newline
+        so the next command starts cleanly.
+        """
+        while True:
+            chunk = await reader.read(1024)
+            if not chunk:
+                return
+            if b"\n" in chunk:
+                return
+
     try:
         while True:
             try:
                 raw = await reader.readline()
-            except (asyncio.LimitOverrunError, ValueError):
-                # Client sent a line longer than the StreamReader can buffer.
-                # Drain to newline, respond with a clean error, keep server alive.
-                await _drain_to_newline(reader)
+            except asyncio.LimitOverrunError:
+                await drain_until_newline()
                 writer.write(LINE_TOO_LONG_ERR.encode("utf-8"))
                 await writer.drain()
                 continue
+            except ValueError as e:
+                # asyncio may raise ValueError: "Separator is found, but chunk is longer than limit"
+                if "chunk is longer than limit" in str(e):
+                    await drain_until_newline()
+                    writer.write(LINE_TOO_LONG_ERR.encode("utf-8"))
+                    await writer.drain()
+                    continue
+                raise
 
             if not raw:
                 break  # client closed
 
-            # Enforce our own max line size (excluding the trailing newline)
-            payload = raw[:-1] if raw.endswith(b"\n") else raw
-            if len(payload) > max_line_bytes:
+            if len(raw) > max_line_bytes + 1:
                 writer.write(LINE_TOO_LONG_ERR.encode("utf-8"))
                 await writer.drain()
                 continue
@@ -56,10 +60,9 @@ async def handle_client(
             line = raw.decode("utf-8", errors="replace")
             req = parse_line(line)
 
-            # Week 3: optional limiter (only enabled when RATELIMMQ_ENABLE_LIMITER=1)
-            # Keep SHUTDOWN always allowed (so you can always stop the server).
-            if ctx.limiter is not None and req.cmd.upper() != "SHUTDOWN":
-                if not ctx.limiter.allow():
+            # If limiter is enabled, allow SHUTDOWN even when limited so tests/users can stop the server
+            if ctx.limiter is not None and not ctx.limiter.allow():
+                if getattr(req, "cmd", "").upper() != "SHUTDOWN":
                     writer.write(RATE_LIMIT_ERR.encode("utf-8"))
                     await writer.drain()
                     continue
@@ -82,15 +85,14 @@ async def main() -> None:
     host = os.environ.get("RATELIMMQ_HOST", "127.0.0.1")
     port = int(os.environ.get("RATELIMMQ_PORT", "5555"))
 
-    # Max line length (bytes, excluding newline). Clamp to keep it reasonable.
     max_line_bytes = int(os.environ.get("RATELIMMQ_MAX_LINE_BYTES", "4096"))
     if max_line_bytes < 32:
-        max_line_bytes = 32
+        max_line_bytes = 32  # keep reasonable
 
     stop_event = asyncio.Event()
     ctx = Context(stop_event=stop_event)
 
-    # Optional limiter
+    # Enable limiter only when explicitly requested
     if os.environ.get("RATELIMMQ_ENABLE_LIMITER", "0") == "1":
         from ratelimmq.limiter import TokenBucket
 
@@ -109,6 +111,8 @@ async def main() -> None:
         lambda r, w: handle_client(r, w, ctx, max_line_bytes),
         host,
         port,
+        # internal StreamReader limit for readline()/readuntil()
+        limit=max_line_bytes + 1,
     )
 
     addrs = ", ".join(str(s.getsockname()) for s in (server.sockets or []))
