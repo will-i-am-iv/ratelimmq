@@ -18,41 +18,20 @@ async def handle_client(
     ctx: Context,
     max_line_bytes: int,
 ) -> None:
-    async def drain_until_newline() -> None:
-        """
-        If a client sends an oversized line, asyncio can raise exceptions,
-        but the oversized bytes may still be buffered. Drain until newline
-        so the next command starts cleanly.
-        """
-        while True:
-            chunk = await reader.read(1024)
-            if not chunk:
-                return
-            if b"\n" in chunk:
-                return
-
+    """
+    One TCP client session:
+      - Read one newline-terminated line at a time
+      - Reject oversized lines with a clean ERR response
+      - Optionally enforce rate limiting (but always allow SHUTDOWN)
+    """
     try:
         while True:
-            try:
-                raw = await reader.readline()
-            except asyncio.LimitOverrunError:
-                await drain_until_newline()
-                writer.write(LINE_TOO_LONG_ERR.encode("utf-8"))
-                await writer.drain()
-                continue
-            except ValueError as e:
-                # asyncio may raise ValueError: "Separator is found, but chunk is longer than limit"
-                if "chunk is longer than limit" in str(e):
-                    await drain_until_newline()
-                    writer.write(LINE_TOO_LONG_ERR.encode("utf-8"))
-                    await writer.drain()
-                    continue
-                raise
-
+            raw = await reader.readline()
             if not raw:
                 break  # client closed
 
-            if len(raw) > max_line_bytes + 1:
+            # Oversized line guard (bytes, includes newline)
+            if len(raw) > max_line_bytes:
                 writer.write(LINE_TOO_LONG_ERR.encode("utf-8"))
                 await writer.drain()
                 continue
@@ -60,12 +39,12 @@ async def handle_client(
             line = raw.decode("utf-8", errors="replace")
             req = parse_line(line)
 
-            # If limiter is enabled, allow SHUTDOWN even when limited so tests/users can stop the server
-            if ctx.limiter is not None and not ctx.limiter.allow():
-                if getattr(req, "cmd", "").upper() != "SHUTDOWN":
-                    writer.write(RATE_LIMIT_ERR.encode("utf-8"))
-                    await writer.drain()
-                    continue
+            # Optional limiter: allow SHUTDOWN even when limited
+            cmd = (getattr(req, "cmd", "") or "").upper()
+            if ctx.limiter is not None and cmd != "SHUTDOWN" and not ctx.limiter.allow():
+                writer.write(RATE_LIMIT_ERR.encode("utf-8"))
+                await writer.drain()
+                continue
 
             resp = await dispatch(ctx, req)
             writer.write(resp.line.encode("utf-8"))
@@ -73,6 +52,17 @@ async def handle_client(
 
             if ctx.stop_event.is_set():
                 break
+
+    except Exception:
+        # If something unexpected happens, avoid hanging the client:
+        # close the connection cleanly.
+        try:
+            writer.close()
+            await writer.wait_closed()
+        except Exception:
+            pass
+        raise
+
     finally:
         try:
             writer.close()
@@ -85,9 +75,10 @@ async def main() -> None:
     host = os.environ.get("RATELIMMQ_HOST", "127.0.0.1")
     port = int(os.environ.get("RATELIMMQ_PORT", "5555"))
 
+    # Max line length (bytes). Keep minimum sane.
     max_line_bytes = int(os.environ.get("RATELIMMQ_MAX_LINE_BYTES", "4096"))
     if max_line_bytes < 32:
-        max_line_bytes = 32  # keep reasonable
+        max_line_bytes = 32
 
     stop_event = asyncio.Event()
     ctx = Context(stop_event=stop_event)
@@ -107,12 +98,12 @@ async def main() -> None:
         except NotImplementedError:
             pass
 
+    # IMPORTANT: do NOT pass asyncio's `limit=` here.
+    # We enforce max bytes ourselves above.
     server = await asyncio.start_server(
         lambda r, w: handle_client(r, w, ctx, max_line_bytes),
         host,
         port,
-        # internal StreamReader limit for readline()/readuntil()
-        limit=max_line_bytes + 1,
     )
 
     addrs = ", ".join(str(s.getsockname()) for s in (server.sockets or []))
@@ -120,8 +111,6 @@ async def main() -> None:
 
     async with server:
         await stop_event.wait()
-        server.close()
-        await server.wait_closed()
 
     print("shutdown complete", flush=True)
 
