@@ -19,10 +19,11 @@ async def handle_client(
     max_line_bytes: int,
 ) -> None:
     """
-    One TCP client session:
-      - Read one newline-terminated line at a time
-      - Reject oversized lines with a clean ERR response
-      - Optionally enforce rate limiting (but always allow SHUTDOWN)
+    Handle one TCP client session.
+
+    - Read one newline-terminated line at a time
+    - Reject oversized lines with a clean ERR response
+    - Optionally enforce rate limiting (but always allow SHUTDOWN)
     """
     try:
         while True:
@@ -41,10 +42,11 @@ async def handle_client(
 
             # Optional limiter: allow SHUTDOWN even when limited
             cmd = (getattr(req, "cmd", "") or "").upper()
-            if ctx.limiter is not None and cmd != "SHUTDOWN" and not ctx.limiter.allow():
-                writer.write(RATE_LIMIT_ERR.encode("utf-8"))
-                await writer.drain()
-                continue
+            if ctx.limiter is not None and cmd != "SHUTDOWN":
+                if not ctx.limiter.allow():
+                    writer.write(RATE_LIMIT_ERR.encode("utf-8"))
+                    await writer.drain()
+                    continue
 
             resp = await dispatch(ctx, req)
             writer.write(resp.line.encode("utf-8"))
@@ -62,7 +64,6 @@ async def handle_client(
         except Exception:
             pass
         raise
-
     finally:
         try:
             writer.close()
@@ -98,8 +99,6 @@ async def main() -> None:
         except NotImplementedError:
             pass
 
-    # IMPORTANT: do NOT pass asyncio's `limit=` here.
-    # We enforce max bytes ourselves above.
     server = await asyncio.start_server(
         lambda r, w: handle_client(r, w, ctx, max_line_bytes),
         host,
@@ -107,7 +106,7 @@ async def main() -> None:
     )
 
     addrs = ", ".join(str(s.getsockname()) for s in (server.sockets or []))
-    print(f"listening on {addrs}", flush=True)
+    print(f"listening on {addrs} | MAX_LINE_BYTES={max_line_bytes}", flush=True)
 
     async with server:
         await stop_event.wait()
@@ -115,5 +114,9 @@ async def main() -> None:
     print("shutdown complete", flush=True)
 
 
-if __name__ == "__main__":
+def run() -> None:
     asyncio.run(main())
+
+
+if __name__ == "__main__":
+    run()
