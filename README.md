@@ -104,10 +104,3 @@ Next steps I plan to implement:
 - Message queue semantics: enqueue/dequeue + correctness tests
 
 ---
-
-## URL fetch benchmark (WIP)
-Create urls.txt with one URL per line, then:
-
-PYTHONPATH=src python3 scripts/bench_urls.py urls.txt --mode asyncio --concurrency 50
-PYTHONPATH=src python3 scripts/bench_urls.py urls.txt --mode threads --concurrency 50
-PYTHONPATH=src python3 scripts/bench_urls.py urls.txt --mode seq
