@@ -7,7 +7,7 @@ This repo will evolve into a rate-limited, correctness-tested message queue + be
 
 ## Changelog
 
-2026-01-05: Server rejects oversized lines cleanly (no crash).
+2026-01-06: Add asyncio URL fetcher scaffold + latency metrics + bench script.
 
 ---
 
@@ -102,3 +102,12 @@ Next steps I plan to implement:
 
 - Rate limiting (token bucket / leaky bucket) per client + global
 - Message queue semantics: enqueue/dequeue + correctness tests
+
+---
+
+## URL fetch benchmark (WIP)
+Create urls.txt with one URL per line, then:
+
+PYTHONPATH=src python3 scripts/bench_urls.py urls.txt --mode asyncio --concurrency 50
+PYTHONPATH=src python3 scripts/bench_urls.py urls.txt --mode threads --concurrency 50
+PYTHONPATH=src python3 scripts/bench_urls.py urls.txt --mode seq
