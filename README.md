@@ -2,7 +2,7 @@
 
 # RateLimMQ
 
-A minimal line-based TCP server (Week 1) that responds to `PING` with `PONG`, supports a graceful `SHUTDOWN`, and is set up with tests + GitHub Actions CI.  
+A minimal line-based TCP server that responds to `PING` with `PONG`, supports a graceful `SHUTDOWN`, and is set up with tests + GitHub Actions CI.  
 This repo will evolve into a rate-limited, correctness-tested message queue + benchmark harness.
 
 ## Changelog
