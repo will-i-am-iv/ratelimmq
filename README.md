@@ -20,7 +20,6 @@ Why this matters: it prevents you from spamming one host and demonstrates real-w
 
 ### Dispatcher quick demo (runs locally)
 
-```bash
 PYTHONPATH=src python3 - <<'PY'
 import asyncio
 from ratelimmq.fetcher import fetch_one
