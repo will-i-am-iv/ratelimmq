@@ -2,7 +2,7 @@
 
 # RateLimMQ
 
-A Python asyncio project that started as a tiny TCP `PING/PONG` server (Week 1) and is evolving into a **high-throughput URL fetcher + rate limiter** with concurrency controls, backpressure, retries, and latency metrics.
+A Python asyncio project that started as a tiny TCP `PING/PONG` server and is evolving into a **high-throughput URL fetcher + rate limiter** with concurrency controls, backpressure, retries, and latency metrics.
 
 ---
 
@@ -86,4 +86,5 @@ Next steps planned (the “high-throughput URL fetcher + rate limiter” roadmap
 ### Quick verify (tests)
 ```bash
 PYTHONPATH=src python3 -m pytest -q
+
 
