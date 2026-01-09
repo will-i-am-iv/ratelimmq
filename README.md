@@ -6,8 +6,43 @@ A minimal line-based TCP server that responds to `PING` with `PONG`, supports a 
 This repo will evolve into a rate-limited, correctness-tested message queue + benchmark harness.
 
 ## Changelog
+- 2026-01-09: Docs — documented Week 4 async dispatcher (global + per-host caps) + demo snippet.
 
-2026-01-06: Add asyncio URL fetcher scaffold + latency metrics + bench script.
+---
+
+## Week 4: Async dispatcher (global + per-host caps)
+
+This repo now includes an **async dispatcher** that runs many URL fetches concurrently, while enforcing:
+- **global concurrency cap** (max total in-flight requests)
+- **per-host concurrency cap** (max in-flight requests per hostname)
+
+Why this matters: it prevents you from spamming one host and demonstrates real-world concurrency control.
+
+### Dispatcher quick demo (runs locally)
+
+```bash
+PYTHONPATH=src python3 - <<'PY'
+import asyncio
+from ratelimmq.fetcher import fetch_one
+from ratelimmq.dispatcher import run_pool, PoolLimits
+
+urls = [
+    "http://example.com/",
+    "http://example.com/",
+    "http://example.com/",
+]
+
+async def fetch(u: str):
+    return await fetch_one(u, timeout_s=3.0)
+
+async def main():
+    limits = PoolLimits(total_concurrency=10, per_host_concurrency=2)
+    results = await run_pool(urls, fetch, limits=limits)
+    print("ok:", [r.ok for r in results])
+    print("status:", [r.status_code for r in results])
+    print("bytes:", [r.bytes_read for r in results])
+
+asyncio.run(main())
 
 ---
 
