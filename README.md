@@ -18,18 +18,18 @@ A Python asyncio project that started as a tiny TCP `PING/PONG` server (Week 1) 
 
 ## Features
 
-### Week 1: TCP server (foundation)
+### TCP server (foundation)
 - ✅ Line-based TCP server: listens on `127.0.0.1:<PORT>`
 - ✅ `PING` → `PONG`
 - ✅ `SHUTDOWN` → `BYE` + clean stop
 - ✅ Unknown command → `ERR unknown command`
 - ✅ Integration tests that spin up the server, send commands, confirm clean shutdown
 
-### Week 3+: Reliability guards
+### Reliability guards
 - ✅ Optional rate limiter hook (token bucket)
 - ✅ Max-line-bytes guard (reject oversized lines without crashing/hanging)
 
-### Week 4+: URL concurrency primitives
+### URL concurrency primitives
 - ✅ Async dispatcher / worker pool with:
   - global concurrency cap (max total in-flight)
   - per-host concurrency cap (max in-flight per hostname)
@@ -86,3 +86,4 @@ Next steps planned (the “high-throughput URL fetcher + rate limiter” roadmap
 ### Quick verify (tests)
 ```bash
 PYTHONPATH=src python3 -m pytest -q
+
