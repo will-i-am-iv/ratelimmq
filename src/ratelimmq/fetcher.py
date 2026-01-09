@@ -9,14 +9,17 @@ from typing import Optional
 
 @dataclass(frozen=True)
 class FetchResult:
+    # REQUIRED (no defaults) must come first
     url: str
     ok: bool
     status_code: Optional[int]
-    bytes: int
+    bytes_read: int
     elapsed_ms: float
-    error: Optional[str]
 
-    # Backwards-compat alias (if any older code used `status`)
+    # OPTIONAL (defaults) must come last
+    error: Optional[str] = None
+
+    # Backwards-compat aliases (in case older code/tests look for different names)
     @property
     def status(self) -> Optional[int]:
         return self.status_code
@@ -24,6 +27,7 @@ class FetchResult:
     @property
     def bytes(self) -> int:
         return self.bytes_read
+
 
 def _fetch_blocking(url: str, timeout_s: float) -> tuple[bool, Optional[int], int, Optional[str]]:
     try:
@@ -44,7 +48,7 @@ async def fetch_one(url: str, *, timeout_s: float = 10.0) -> FetchResult:
         url=url,
         ok=ok,
         status_code=status_code,
-        bytes=nbytes,
+        bytes_read=nbytes,
         elapsed_ms=elapsed_ms,
         error=err,
     )
