@@ -6,6 +6,7 @@ from pathlib import Path
 
 from ratelimmq.dispatcher import PoolLimits, run_pool
 from ratelimmq.fetcher import fetch_one
+from ratelimmq.logging_config import setup_logging
 
 
 def read_urls(path: str) -> list[str]:
@@ -15,6 +16,9 @@ def read_urls(path: str) -> list[str]:
 
 
 async def main() -> None:
+    # IMPORTANT: without this, INFO logs (including pool_summary) won't show up.
+    setup_logging()
+
     ap = argparse.ArgumentParser()
     ap.add_argument("urls_file", help="text file with one URL per line")
     ap.add_argument("--total", type=int, default=50, help="global concurrency cap")
