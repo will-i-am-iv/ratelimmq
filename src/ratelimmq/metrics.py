@@ -1,9 +1,8 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Iterable, Optional
-
-import math
 
 
 @dataclass(frozen=True)
@@ -36,36 +35,49 @@ def _quantile_ms(sorted_vals_s: list[float], q: float) -> float:
     pos = (n - 1) * q
     lo = int(math.floor(pos))
     hi = int(math.ceil(pos))
+
     if lo == hi:
         return sorted_vals_s[lo] * 1000.0
+
     frac = pos - lo
     v = sorted_vals_s[lo] * (1.0 - frac) + sorted_vals_s[hi] * frac
     return v * 1000.0
 
 
-def summarize_latencies(latencies_s: Iterable[float], total_s: Optional[float] = None) -> LatencySummary:
+def summarize_latencies(
+    latencies_s: Iterable[float],
+    total_time_s: Optional[float] = None,
+    *,
+    # Back-compat alias: some callers may pass total_s=
+    total_s: Optional[float] = None,
+) -> LatencySummary:
     """
     Summarize request latencies (seconds) into p50/p95/p99 + mean/min/max (ms) and rps.
 
-    - latencies_s: iterable of per-request latencies in seconds
-    - total_s: wall-clock duration in seconds (recommended). If None, we fall back to sum(latencies).
+    - latencies_s: iterable of per-request latencies in seconds.
+    - total_time_s: wall-clock duration in seconds (recommended). Used to compute rps.
+    - total_s: alias for total_time_s (kept for older code).
     """
     vals = [float(x) for x in latencies_s if x is not None]
     vals = [x for x in vals if x >= 0.0]
-
     vals.sort()
+
     count = len(vals)
 
-    if total_s is None:
-        total_s = float(sum(vals)) if count else 0.0
-    total_s = float(total_s)
+    if total_time_s is None and total_s is not None:
+        total_time_s = float(total_s)
 
-    rps = (count / total_s) if total_s > 0 else 0.0
+    if total_time_s is None:
+        # Fallback: if caller didn't provide wall-clock, use sum of latencies.
+        total_time_s = float(sum(vals)) if count else 0.0
+
+    total_time_s = float(total_time_s) if total_time_s and total_time_s > 0 else 0.0
+    rps = (count / total_time_s) if total_time_s > 0 else 0.0
 
     if count == 0:
         return LatencySummary(
             count=0,
-            total_s=total_s,
+            total_s=total_time_s,
             rps=rps,
             mean_ms=0.0,
             p50_ms=0.0,
@@ -81,7 +93,7 @@ def summarize_latencies(latencies_s: Iterable[float], total_s: Optional[float] =
 
     return LatencySummary(
         count=count,
-        total_s=total_s,
+        total_s=total_time_s,
         rps=rps,
         mean_ms=mean_ms,
         p50_ms=_quantile_ms(vals, 0.50),
@@ -92,30 +104,61 @@ def summarize_latencies(latencies_s: Iterable[float], total_s: Optional[float] =
     )
 
 
-def format_prometheus_text(s: LatencySummary) -> str:
-    """
-    Prometheus-style exposition text WITHOUT requiring prometheus_client.
-    You can later serve this on /metrics with your own tiny HTTP handler.
-    """
-    lines = [
-        "# TYPE ratelimmq_requests_total gauge",
-        f"ratelimmq_requests_total {s.count}",
-        "# TYPE ratelimmq_total_seconds gauge",
-        f"ratelimmq_total_seconds {s.total_s:.6f}",
-        "# TYPE ratelimmq_rps gauge",
-        f"ratelimmq_rps {s.rps:.6f}",
-        "# TYPE ratelimmq_latency_mean_ms gauge",
-        f"ratelimmq_latency_mean_ms {s.mean_ms:.6f}",
-        "# TYPE ratelimmq_latency_p50_ms gauge",
-        f"ratelimmq_latency_p50_ms {s.p50_ms:.6f}",
-        "# TYPE ratelimmq_latency_p95_ms gauge",
-        f"ratelimmq_latency_p95_ms {s.p95_ms:.6f}",
-        "# TYPE ratelimmq_latency_p99_ms gauge",
-        f"ratelimmq_latency_p99_ms {s.p99_ms:.6f}",
-        "# TYPE ratelimmq_latency_min_ms gauge",
-        f"ratelimmq_latency_min_ms {s.min_ms:.6f}",
-        "# TYPE ratelimmq_latency_max_ms gauge",
-        f"ratelimmq_latency_max_ms {s.max_ms:.6f}",
-        "",
-    ]
-    return "\n".join(lines)
+# -------------------------------
+# Optional Prometheus integration
+# -------------------------------
+# CI should NOT require prometheus_client. If it's missing, these become no-ops.
+
+_HAS_PROM = False
+try:
+    from prometheus_client import Counter, Histogram, start_http_server  # type: ignore
+
+    _HAS_PROM = True
+except Exception:
+    Counter = None  # type: ignore
+    Histogram = None  # type: ignore
+    start_http_server = None  # type: ignore
+
+
+_REQ_TOTAL = None
+_REQ_LATENCY_S = None
+_PROM_STARTED = False
+
+
+def start_prometheus(port: int = 8000) -> bool:
+    """Start /metrics endpoint. Returns False if prometheus_client isn't installed."""
+    global _PROM_STARTED, _REQ_TOTAL, _REQ_LATENCY_S
+
+    if not _HAS_PROM or start_http_server is None:
+        return False
+    if _PROM_STARTED:
+        return True
+
+    _REQ_TOTAL = Counter(
+        "ratelimmq_requests_total",
+        "Total HTTP fetch requests",
+        ["outcome"],
+    )
+    _REQ_LATENCY_S = Histogram(
+        "ratelimmq_request_latency_seconds",
+        "HTTP fetch request latency in seconds",
+        buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0),
+    )
+
+    start_http_server(int(port))
+    _PROM_STARTED = True
+    return True
+
+
+def prom_observe(outcome: str, elapsed_s: float) -> None:
+    """Record metrics if Prometheus is enabled; otherwise no-op."""
+    if not _HAS_PROM:
+        return
+    if _REQ_TOTAL is None or _REQ_LATENCY_S is None:
+        return
+
+    try:
+        _REQ_TOTAL.labels(outcome=outcome).inc()
+        _REQ_LATENCY_S.observe(float(elapsed_s))
+    except Exception:
+        return
