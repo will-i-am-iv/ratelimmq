@@ -2,89 +2,82 @@
 
 # RateLimMQ
 
-A Python asyncio project that started as a tiny TCP `PING/PONG` server and is evolving into a **high-throughput URL fetcher + rate limiter** with concurrency controls, backpressure, retries, and latency metrics.
+A minimal line-based TCP server (Week 1) that responds to `PING` with `PONG`, supports a graceful `SHUTDOWN`, and is set up with tests + GitHub Actions CI.
+
+This repo is evolving into a correctness-tested, rate-limited message queue + benchmark harness.
 
 ---
 
 ## Technologies used
-
 - Python 3.12
-- `asyncio` (concurrency + I/O)
-- `socket` (TCP tests / netcat usage)
+- `asyncio` (TCP server + concurrency)
+- `socket` / netcat (client/test connections)
 - `pytest` (tests)
 - GitHub Actions (CI)
 
 ---
 
 ## Features
-
-### TCP server (foundation)
-- ✅ Line-based TCP server: listens on `127.0.0.1:<PORT>`
+- ✅ TCP server that listens on `127.0.0.1:<PORT>`
 - ✅ `PING` → `PONG`
-- ✅ `SHUTDOWN` → `BYE` + clean stop
+- ✅ `SHUTDOWN` → `BYE` + server stops cleanly
 - ✅ Unknown command → `ERR unknown command`
-- ✅ Integration tests that spin up the server, send commands, confirm clean shutdown
-
-### Reliability guards
-- ✅ Optional rate limiter hook (token bucket)
-- ✅ Max-line-bytes guard (reject oversized lines without crashing/hanging)
-
-### URL concurrency primitives
-- ✅ Async dispatcher / worker pool with:
-  - global concurrency cap (max total in-flight)
-  - per-host concurrency cap (max in-flight per hostname)
+- ✅ Optional rate limiting (token bucket)
+- ✅ Oversized line protection (server returns `ERR line too long` without crashing)
+- ✅ Async dispatcher (worker pool) with:
+  - global concurrency cap
+  - per-host concurrency cap
+  - optional bounded queue backpressure (`max_queue`)
+- ✅ Latency metrics helpers (p50/p95/p99 + rps)
+- ✅ Structured JSON logging (optional)
 
 ---
 
 ## Keyboard shortcuts
-
 While running the server in a terminal:
-- `Ctrl + C` = stop the server process
+- `Ctrl + C` → interrupt/stop the server process (manual stop)
 
-In a `nc` (netcat) client session:
-- `Ctrl + C` = exit `nc`
+In a `nc` client session:
+- `Ctrl + C` → exit `nc`
 
 ---
 
 ## The process
-
-Milestones so far:
-- Week 1: build + test a minimal asyncio TCP protocol server
-- Week 3: add safety guards + optional limiter plumbing
-- Week 4: add async dispatcher (global + per-host caps)
-- (Next) build the URL fetcher pipeline + backpressure + retries + metrics writeup
+1. Built a minimal TCP server with `asyncio.start_server`
+2. Defined a simple, line-based protocol (`PING`, `SHUTDOWN`, default error)
+3. Added safe shutdown behavior so tests don’t hang
+4. Added correctness tests that start the server on a free port and verify responses
+5. Added rate limiting + max-line-length guardrails
+6. Built an async dispatcher that demonstrates real-world concurrency control
 
 ---
 
 ## What I learned
-
-- How asyncio servers read/write newline-delimited protocols (`StreamReader` / `StreamWriter`)
-- How to make server shutdown deterministic so CI doesn’t hang
-- Why “concurrency control” matters (global caps + per-host caps prevent overload)
-- How to write tests that safely start subprocess servers and verify behavior
+- How to build a simple TCP protocol on top of `asyncio`
+- How to test network services reliably (free port selection, readiness polling, subprocess lifecycle)
+- How to enforce concurrency limits (global + per-host caps)
+- What “backpressure” means and why bounded queues matter
+- Why structured logs are useful for async debugging
 
 ---
 
-## How can it be improved
-
-Next steps planned (the “high-throughput URL fetcher + rate limiter” roadmap):
-- Bounded queue backpressure (don’t accept infinite work)
-- Async URL fetching worker pool (async I/O)
-- Per-host rate limiting + global concurrency cap (together)
-- Retries with exponential backoff + jitter
-- Metrics: p50/p95/p99 latency + requests/sec
-- Compare implementations:
-  - naive sequential
-  - threads
-  - asyncio
-- Writeup: **“Why asyncio wins here + where it doesn’t”**
+## How it could be improved
+Next steps I plan to implement:
+- Retry with exponential backoff (network failures)
+- Per-host rate limiting (not just per-host concurrency caps)
+- Better protocol + response structure (request IDs, structured errors)
+- Benchmark harness + writeup: “why asyncio wins here + where it doesn’t”
+- Video demo (TODO)
 
 ---
 
 ## Running the project
 
-### Quick verify (tests)
+### 1) Create + activate a virtual environment
 ```bash
-PYTHONPATH=src python3 -m pytest -q
+cd "/Users/a15106/Desktop/ME/Personal/CAL/Misc/Github Projects/ratelimmq"
+python3 -m venv .venv
+source .venv/bin/activate
+python3 -m pip install -U pip pytest
 
 
