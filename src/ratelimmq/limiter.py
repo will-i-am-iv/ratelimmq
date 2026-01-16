@@ -7,49 +7,60 @@ import time
 @dataclass
 class TokenBucket:
     """
-    Simple token bucket limiter.
+    Simple token bucket.
 
-    capacity: max tokens in the bucket
-    refill_rate: tokens per second
+    - capacity: max tokens in the bucket (burst)
+    - refill_rate: tokens per second
+    - tokens: current token count
+    - last_ts: last refill timestamp (seconds, monotonic)
     """
     capacity: float
     refill_rate: float
-    tokens: float | None = None
-    last_ts: float | None = None
+    tokens: float = 0.0
+    last_ts: float = 0.0
 
     def __post_init__(self) -> None:
+        self.capacity = float(self.capacity)
+        self.refill_rate = float(self.refill_rate)
         if self.capacity <= 0:
             raise ValueError("capacity must be > 0")
         if self.refill_rate < 0:
             raise ValueError("refill_rate must be >= 0")
-
-        now = time.monotonic()
-        if self.tokens is None:
-            self.tokens = float(self.capacity)
-        if self.last_ts is None:
-            self.last_ts = now
+        if self.last_ts == 0.0:
+            self.last_ts = time.monotonic()
+        if self.tokens == 0.0:
+            self.tokens = self.capacity
 
     def _refill(self, now: float) -> None:
-        assert self.tokens is not None
-        assert self.last_ts is not None
-
-        elapsed = max(0.0, now - self.last_ts)
-        self.tokens = min(float(self.capacity), self.tokens + elapsed * float(self.refill_rate))
+        if self.refill_rate <= 0:
+            self.last_ts = now
+            return
+        dt = max(0.0, now - self.last_ts)
         self.last_ts = now
+        self.tokens = min(self.capacity, self.tokens + dt * self.refill_rate)
 
     def allow(self, cost: float = 1.0, now: float | None = None) -> bool:
-        """
-        Returns True if the bucket has >= cost tokens; consumes cost tokens.
-        If now is provided, it is used for deterministic testing.
-        """
         if cost <= 0:
             raise ValueError("cost must be > 0")
-
         t = time.monotonic() if now is None else float(now)
         self._refill(t)
-
-        assert self.tokens is not None
         if self.tokens >= cost:
             self.tokens -= cost
             return True
         return False
+
+    def wait_time(self, cost: float = 1.0, now: float | None = None) -> float:
+        """
+        Returns seconds to wait until `cost` tokens are available.
+        0.0 means "you can proceed now".
+        """
+        if cost <= 0:
+            raise ValueError("cost must be > 0")
+        t = time.monotonic() if now is None else float(now)
+        self._refill(t)
+        if self.tokens >= cost:
+            return 0.0
+        if self.refill_rate <= 0:
+            return float("inf")
+        missing = cost - self.tokens
+        return missing / self.refill_rate
