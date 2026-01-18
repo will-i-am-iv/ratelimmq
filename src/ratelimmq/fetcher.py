@@ -1,30 +1,29 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import random
 import time
-import urllib.error
 import urllib.request
 from dataclasses import dataclass
-from typing import Optional, Tuple
-
-logger = logging.getLogger("ratelimmq.fetcher")
+from typing import Iterable, Optional, Sequence, Tuple
 
 
 @dataclass(frozen=True)
 class FetchResult:
-    # REQUIRED (no defaults) must come first
+    """
+    Result of a single URL fetch attempt sequence (may include retries).
+    """
     url: str
     ok: bool
     status_code: Optional[int]
     bytes_read: int
     elapsed_ms: float
-
-    # OPTIONAL (defaults) must come last
     error: Optional[str] = None
 
-    # Backwards-compat aliases (older code/tests might look for these)
+    # New: how many attempts were made total (1 = no retries)
+    attempts: int = 1
+
+    # Back-compat aliases (older code/tests may reference these names)
     @property
     def status(self) -> Optional[int]:
         return self.status_code
@@ -36,8 +35,8 @@ class FetchResult:
 
 def _fetch_blocking(url: str, timeout_s: float) -> Tuple[bool, Optional[int], int, Optional[str]]:
     """
-    Blocking URL fetch. Returns:
-      (ok, status_code, bytes_read, error)
+    Blocking HTTP fetch using urllib (runs inside a thread via asyncio.to_thread).
+    Returns: (ok, status_code, bytes_read, error_string)
     """
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "ratelimmq/1.0"})
@@ -45,36 +44,33 @@ def _fetch_blocking(url: str, timeout_s: float) -> Tuple[bool, Optional[int], in
             status_code = getattr(resp, "status", None)
             body = resp.read()
             return True, status_code, len(body), None
-
-    except urllib.error.HTTPError as e:
-        # HTTPError is raised for non-2xx/3xx responses in urllib
-        code = getattr(e, "code", None)
-        reason = getattr(e, "reason", "")
-        return False, code, 0, f"HTTPError {code}: {reason}"
-
     except Exception as e:
-        return False, None, 0, f"{type(e).__name__}: {e}"
+        # urllib raises HTTPError for non-2xx; it has `.code` (status)
+        status_code = getattr(e, "code", None)
+        return False, status_code, 0, f"{type(e).__name__}: {e}"
 
 
-def _is_retryable(ok: bool, status_code: Optional[int]) -> bool:
-    if ok:
-        return False
-    # Network failures, DNS failures, timeouts, etc.
+def _is_retryable_status(status_code: Optional[int], retry_statuses: Sequence[int]) -> bool:
+    # If we don't have a status_code (DNS error, timeout, etc.) treat it as retryable.
     if status_code is None:
         return True
-    # Common retryable HTTP statuses
-    return status_code in {408, 429, 500, 502, 503, 504}
+    return int(status_code) in set(int(x) for x in retry_statuses)
 
 
-def _backoff_seconds(attempt_index: int, base: float, cap: float, jitter: float) -> float:
+def _full_jitter_delay(attempt: int, base_s: float, cap_s: float, jitter: bool) -> float:
     """
-    attempt_index: 0,1,2,...
-    delay = min(cap, base * 2^attempt) + random(0..jitter)
+    Exponential backoff with optional "full jitter":
+      max_delay = min(cap, base * 2^attempt)
+      delay = uniform(0, max_delay)   (if jitter)
+      delay = max_delay              (if no jitter)
     """
-    delay = min(cap, base * (2 ** attempt_index))
-    if jitter > 0:
-        delay += random.uniform(0.0, jitter)
-    return delay
+    base_s = max(0.0, float(base_s))
+    cap_s = max(0.0, float(cap_s))
+
+    max_delay = min(cap_s, base_s * (2 ** attempt))
+    if max_delay <= 0:
+        return 0.0
+    return random.uniform(0.0, max_delay) if jitter else max_delay
 
 
 async def fetch_one(
@@ -83,72 +79,62 @@ async def fetch_one(
     timeout_s: float = 10.0,
     retries: int = 0,
     backoff_base_s: float = 0.2,
-    backoff_max_s: float = 2.0,
-    jitter_s: float = 0.05,
+    backoff_cap_s: float = 5.0,
+    jitter: bool = True,
+    retry_statuses: Sequence[int] = (408, 429, 500, 502, 503, 504),
 ) -> FetchResult:
     """
-    Fetch one URL.
+    Fetch one URL with optional retries.
 
-    retries=0 means "try once, no retries".
-    retries=3 means "up to 4 total attempts".
+    retries = 0 means "try once".
+    Backoff happens between failed attempts (retryable only).
     """
-    last: Optional[FetchResult] = None
+    retries = max(0, int(retries))
 
-    for attempt in range(retries + 1):
-        logger.info(
-            "fetch_start",
-            extra={"url": url, "timeout_s": timeout_s, "attempt": attempt + 1, "retries": retries},
-        )
+    t0 = time.perf_counter()
+    attempt = 0
 
-        t0 = time.perf_counter()
-        ok, status_code, nbytes, err = await asyncio.to_thread(_fetch_blocking, url, timeout_s)
+    while True:
+        ok, status_code, bytes_read, err = await asyncio.to_thread(_fetch_blocking, url, float(timeout_s))
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
 
-        res = FetchResult(
-            url=url,
-            ok=ok,
-            status_code=status_code,
-            bytes_read=nbytes,
-            elapsed_ms=elapsed_ms,
-            error=err,
-        )
-        last = res
-
-        logger.info(
-            "fetch_done",
-            extra={
-                "url": url,
-                "attempt": attempt + 1,
-                "ok": ok,
-                "status_code": status_code,
-                "bytes_read": nbytes,
-                "elapsed_ms": round(elapsed_ms, 3),
-                "error": err,
-            },
-        )
-
-        # Success: stop immediately
         if ok:
-            return res
-
-        # Retry if allowed + retryable
-        if attempt < retries and _is_retryable(ok, status_code):
-            sleep_s = _backoff_seconds(attempt, backoff_base_s, backoff_max_s, jitter_s)
-            logger.warning(
-                "fetch_retry",
-                extra={
-                    "url": url,
-                    "attempt": attempt + 1,
-                    "sleep_s": round(sleep_s, 3),
-                    "status_code": status_code,
-                    "error": err,
-                },
+            return FetchResult(
+                url=url,
+                ok=True,
+                status_code=status_code,
+                bytes_read=bytes_read,
+                elapsed_ms=elapsed_ms,
+                error=None,
+                attempts=attempt + 1,
             )
-            await asyncio.sleep(sleep_s)
-            continue
 
-        break
+        retryable = _is_retryable_status(status_code, retry_statuses)
 
-    # If we reach here, we failed all attempts
-    assert last is not None
-    return last
+        if (attempt >= retries) or (not retryable):
+            return FetchResult(
+                url=url,
+                ok=False,
+                status_code=status_code,
+                bytes_read=bytes_read,
+                elapsed_ms=elapsed_ms,
+                error=err,
+                attempts=attempt + 1,
+            )
+
+        # Sleep before the next attempt
+        delay_s = _full_jitter_delay(attempt, backoff_base_s, backoff_cap_s, jitter)
+        if delay_s > 0:
+            await asyncio.sleep(delay_s)
+
+        attempt += 1
+
+
+def collect_latencies_s(results: Iterable[FetchResult]) -> list[float]:
+    """
+    Helper: convert FetchResult.elapsed_ms -> seconds for metrics summarization.
+    """
+    out: list[float] = []
+    for r in results:
+        out.append(float(r.elapsed_ms) / 1000.0)
+    return out
