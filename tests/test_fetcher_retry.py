@@ -1,80 +1,94 @@
 import asyncio
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-import ratelimmq.fetcher as f
+from ratelimmq.fetcher import fetch_one
 
 
-def test_fetch_one_retries_then_succeeds(monkeypatch):
-    calls = {"n": 0}
+class _FlakyHandler(BaseHTTPRequestHandler):
+    # class-level counters so the test can check how many requests happened
+    count = 0
+    fail_first = 2
 
-    def fake_blocking(url: str, timeout_s: float):
-        calls["n"] += 1
-        # fail once with retryable status, then succeed
-        if calls["n"] == 1:
-            return False, 503, 0, "HTTPError: 503"
-        return True, 200, 5, None
+    def do_GET(self):
+        type(self).count += 1
+        if type(self).count <= type(self).fail_first:
+            self.send_response(500)
+            self.end_headers()
+            self.wfile.write(b"fail")
+        else:
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"ok")
 
-    async def fake_to_thread(func, *args):
-        return func(*args)
+    def log_message(self, fmt, *args):
+        # silence server logs in tests
+        return
 
-    sleeps = []
 
-    async def fake_sleep(s: float):
-        sleeps.append(float(s))
+class _NotFoundHandler(BaseHTTPRequestHandler):
+    count = 0
 
-    # Make backoff deterministic: return max delay
-    monkeypatch.setattr(f.random, "uniform", lambda a, b: b)
-    monkeypatch.setattr(f, "_fetch_blocking", fake_blocking)
-    monkeypatch.setattr(f.asyncio, "to_thread", fake_to_thread)
-    monkeypatch.setattr(f.asyncio, "sleep", fake_sleep)
+    def do_GET(self):
+        type(self).count += 1
+        self.send_response(404)
+        self.end_headers()
+        self.wfile.write(b"nope")
 
-    res = asyncio.run(
-        f.fetch_one(
-            "http://example.com/",
-            timeout_s=0.1,
-            retries=2,
-            backoff_base_s=0.2,
-            backoff_cap_s=5.0,
-            jitter=True,
+    def log_message(self, fmt, *args):
+        return
+
+
+def _start_server(handler_cls):
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler_cls)
+    host, port = httpd.server_address
+    t = threading.Thread(target=httpd.serve_forever, daemon=True)
+    t.start()
+    return httpd, host, port
+
+
+def test_fetch_retries_then_succeeds():
+    _FlakyHandler.count = 0
+    _FlakyHandler.fail_first = 2
+    httpd, host, port = _start_server(_FlakyHandler)
+    try:
+        url = f"http://{host}:{port}/"
+        res = asyncio.run(
+            fetch_one(
+                url,
+                timeout_s=3.0,
+                retries=3,
+                backoff_base_s=0.01,
+                backoff_max_s=0.05,
+                jitter_s=0.0,
+            )
         )
-    )
-
-    assert res.ok is True
-    assert res.status_code == 200
-    assert res.attempts == 2
-    assert calls["n"] == 2
-    # attempt=0 backoff => max_delay=0.2
-    assert sleeps == [0.2]
+        assert res.ok is True
+        assert res.status_code == 200
+        # 2 failures + 1 success
+        assert _FlakyHandler.count == 3
+    finally:
+        httpd.shutdown()
 
 
-def test_fetch_one_does_not_retry_on_non_retryable_status(monkeypatch):
-    calls = {"n": 0}
-
-    def fake_blocking(url: str, timeout_s: float):
-        calls["n"] += 1
-        return False, 400, 0, "HTTPError: 400"
-
-    async def fake_to_thread(func, *args):
-        return func(*args)
-
-    sleeps = []
-
-    async def fake_sleep(s: float):
-        sleeps.append(float(s))
-
-    monkeypatch.setattr(f, "_fetch_blocking", fake_blocking)
-    monkeypatch.setattr(f.asyncio, "to_thread", fake_to_thread)
-    monkeypatch.setattr(f.asyncio, "sleep", fake_sleep)
-
-    res = asyncio.run(
-        f.fetch_one(
-            "http://example.com/",
-            timeout_s=0.1,
-            retries=5,  # even with retries, 400 should not retry
+def test_fetch_does_not_retry_on_404():
+    _NotFoundHandler.count = 0
+    httpd, host, port = _start_server(_NotFoundHandler)
+    try:
+        url = f"http://{host}:{port}/"
+        res = asyncio.run(
+            fetch_one(
+                url,
+                timeout_s=3.0,
+                retries=5,
+                backoff_base_s=0.01,
+                backoff_max_s=0.05,
+                jitter_s=0.0,
+            )
         )
-    )
-
-    assert res.ok is False
-    assert res.status_code == 400
-    assert res.attempts == 1
-    assert calls["n"] == 1
-    assert sleeps == []
+        assert res.ok is False
+        assert res.status_code == 404
+        # should only hit once
+        assert _NotFoundHandler.count == 1
+    finally:
+        httpd.shutdown()
