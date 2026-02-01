@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import time
-from typing import List
+from pathlib import Path
 
 from ratelimmq.dispatcher import PoolLimits, run_pool
 from ratelimmq.fetcher import fetch_one
@@ -11,66 +11,63 @@ from ratelimmq.logging_config import setup_logging
 from ratelimmq.metrics import summarize_latencies
 
 
-def read_urls(path: str) -> List[str]:
-    urls: List[str] = []
-    with open(path, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            urls.append(line)
-    return urls
+def read_urls(path: str) -> list[str]:
+    p = Path(path)
+    lines = [ln.strip() for ln in p.read_text(encoding="utf-8").splitlines()]
+    return [ln for ln in lines if ln and not ln.startswith("#")]
 
 
-async def _fetch(u: str, timeout_s: float) -> object:
-    return await fetch_one(u, timeout_s=timeout_s)
-
-
-def main() -> None:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("urls_file", help="text file with one URL per line")
-    ap.add_argument("--total", type=int, default=10, help="global concurrency cap")
-    ap.add_argument("--per-host", type=int, default=2, help="per-host concurrency cap")
-    ap.add_argument("--max-queue", type=int, default=0, help="bounded queue size (0 = unbounded)")
-    ap.add_argument("--timeout", type=float, default=3.0, help="per-request timeout seconds")
-    args = ap.parse_args()
-
+async def main() -> None:
     setup_logging()
 
+    ap = argparse.ArgumentParser()
+    ap.add_argument("urls_file")
+    ap.add_argument("--total", type=int, default=10)
+    ap.add_argument("--per-host", type=int, default=2)
+    ap.add_argument("--max-queue", type=int, default=10)
+    ap.add_argument("--per-host-rps", type=float, default=0.0)
+    ap.add_argument("--burst", type=float, default=0.0)
+
+    ap.add_argument("--timeout", type=float, default=3.0)
+    ap.add_argument("--retries", type=int, default=2)
+    ap.add_argument("--base", type=float, default=0.05)
+    ap.add_argument("--cap", type=float, default=0.5)
+    ap.add_argument("--jitter", type=float, default=0.05)
+    args = ap.parse_args()
+
     urls = read_urls(args.urls_file)
-    limits = PoolLimits(total_concurrency=args.total, per_host_concurrency=args.per_host)
-    max_queue = None if args.max_queue <= 0 else args.max_queue
+
+    limits = PoolLimits(
+        total_concurrency=args.total,
+        per_host_concurrency=args.per_host,
+        max_queue=max(0, args.max_queue),
+        per_host_rps=max(0.0, args.per_host_rps),
+        per_host_burst=max(0.0, args.burst),
+    )
+
+    async def fetch(u: str):
+        return await fetch_one(
+            u,
+            timeout_s=args.timeout,
+            retries=args.retries,
+            backoff_base_s=args.base,
+            backoff_max_s=args.cap,
+            jitter_s=args.jitter,
+        )
 
     t0 = time.perf_counter()
-    results = asyncio.run(
-        run_pool(
-            urls,
-            lambda u: _fetch(u, timeout_s=args.timeout),
-            limits=limits,
-            max_queue=max_queue,
-        )
-    )
+    results = await run_pool(urls, fetch, limits=limits)
     total_s = time.perf_counter() - t0
 
-    ok = [bool(getattr(r, "ok", False)) for r in results]
-    ok_count = sum(1 for x in ok if x)
+    lat_s = [float(getattr(r, "elapsed_ms", 0.0)) / 1000.0 for r in results]
+    s = summarize_latencies(lat_s, total_s=total_s)
+    ok_count = sum(1 for r in results if getattr(r, "ok", False))
 
-    # Print a clean summary line every run (even if logs are JSON)
-    lat_s = []
-    for r in results:
-        ms = getattr(r, "elapsed_ms", None)
-        if ms is not None:
-            lat_s.append(float(ms) / 1000.0)
-
-    if lat_s:
-        s = summarize_latencies(lat_s, total_s=total_s)
-        print(
-            f"pool_summary count={s.count} ok={ok_count} total_s={s.total_s:.3f} "
-            f"rps={s.rps:.1f} p50_ms={s.p50_ms:.1f} p95_ms={s.p95_ms:.1f} p99_ms={s.p99_ms:.1f}"
-        )
-
-    print(f"done: {ok_count}/{len(results)} ok")
+    print(
+        f"pool_summary count={s.count} ok={ok_count} total_s={s.total_s:.3f} "
+        f"rps={s.rps:.1f} p50_ms={s.p50_ms:.1f} p95_ms={s.p95_ms:.1f} p99_ms={s.p99_ms:.1f}"
+    )
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
