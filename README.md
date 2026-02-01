@@ -40,3 +40,11 @@
 ### Tests
 ```bash
 PYTHONPATH=src python3 -m pytest -q
+
+
+```md
+### Run locally (Week 1 TCP server)
+
+#### Terminal 1 — start the server
+```bash
+PYTHONPATH=src RATELIMMQ_HOST=127.0.0.1 RATELIMMQ_PORT=5555 python3 -u src/ratelimmq/server.py
