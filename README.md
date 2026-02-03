@@ -170,3 +170,4 @@ Add a link:
 - Switch to a true async HTTP client (`aiohttp`) for fully async sockets
 - Add benchmark charts / writeup with comparisons
 - Optional caching (TTL/LRU) on the fetcher path
+
