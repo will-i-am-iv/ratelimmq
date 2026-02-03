@@ -151,17 +151,15 @@ These are the knobs you’ll use most when demoing:
 
 ---
 
-## Video demo (add this when ready)
+## Video demo (autoplay)
 
-### Option A: YouTube (simplest)
-Add a link:
-```md
-**Demo:** https://youtu.be/XXXX
-```
+<p align="center">
+  <img src="assets/demo.gif" alt="RateLimMQ demo" width="900" />
+</p>
 
-### Option B: attach a video to GitHub and embed
-1) Upload an `.mp4` in a GitHub Issue comment (or PR comment)
-2) Copy the generated `https://user-images...mp4` URL and paste it here.
+**Full-size GIF:** [assets/demo.gif](assets/demo.gif)
+
+*(Generated with `vhs demo.tape` + ffmpeg; see `demo.tape`.)*
 
 ---
 
@@ -170,4 +168,5 @@ Add a link:
 - Switch to a true async HTTP client (`aiohttp`) for fully async sockets
 - Add benchmark charts / writeup with comparisons
 - Optional caching (TTL/LRU) on the fetcher path
+
 
